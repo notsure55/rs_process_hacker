@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::os::unix::prelude::FileExt;
 use std::io;
 use std::fs;
+use bytemuck::Pod;
 
 #[derive(Debug)]
 pub struct Process {
@@ -66,22 +67,19 @@ impl Process {
     fn find_handle(pid: u32) -> Result<fs::File, io::Error> {
         Ok(fs::File::open(format!("/proc/{}/mem", pid))?)
     }
-    pub fn find_value<T: Copy + PartialEq>(&self, value: T) -> Result<Vec<usize>, io::Error> {
+    // we add pod to traits or else we cant use try_from_bytes
+    pub fn find_value<T: Copy + PartialEq + Pod>(&self, value: T) -> Result<Vec<usize>, io::Error> {
         let mut address_vec = Vec::new();
-        for (start_address, end_address) in self.maps.clone() {
-            let mut address = start_address;
+        for (start_address, end_address) in self.maps.clone() {            
             // make sure address doesnt access invalid mem
-            while address != end_address - std::mem::size_of::<T>() {
-                let mut buf = vec![0u8; std::mem::size_of::<T>()];
-                self.handle.read_at(&mut buf, address as u64)?;              
-                let ptr = buf.as_ptr() as *const T;
-                let read_value = unsafe {
-                    ptr.read_unaligned()
-                };
+            let size = end_address - start_address;
+            for i in 0..=(size - std::mem::size_of::<T>()) {
+                let mut buf = vec![0u8; size];
+                self.handle.read_at(&mut buf, start_address as u64)?;
+                let read_value: T = *bytemuck::try_from_bytes(&buf[i..=(std::mem::size_of::<T>() + i)]).unwrap(); 
                 if read_value == value {
-                    address_vec.push(address);
-                }
-                address += 1;
+                    address_vec.push(i + start_address);
+                }                
             }            
         }
         if address_vec.is_empty() {

@@ -1,7 +1,7 @@
 use crate::process;
 use std::collections::BTreeMap;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 enum Type {
     #[default]
     Integer,
@@ -15,12 +15,13 @@ pub struct MyApp {
     pid: u32,
     address: String,    
     guess: String,
-    value: i32,
-    addresses: BTreeMap<usize, Type>,
+    value: String,
+    addresses: BTreeMap<String, Type>,
+    vec: Vec<usize>,
 }
 
 // TODO: implement grid, to store addresses for further inspection,
-// display all addresses with the value of current, and initial value when searching
+// display all addresses with the value of current, and initial value when searching.
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -28,19 +29,28 @@ impl eframe::App for MyApp {
             ui.heading("My egui Application");            
             match self.name {
                 Some(ref name) =>
-                {                    
-                    ui.label(format!("Process_name: {}, pid: {}", name, self.pid));
+                {                                                            
                     ui.horizontal(|ui| {                        
-                        let name_label = ui.label("Your address: ");
-                        ui.text_edit_singleline(&mut self.address)
+                        let name_label = ui.label("Your value: ");
+                        ui.text_edit_singleline(&mut self.value)
                             .labelled_by(name_label.id);
-                    });            
+                    });
+                    
+                    if ui.button("Search").clicked() {
+                        let process = process::Process::new(name).unwrap();
+                        self.vec = process.find_value(100).unwrap();
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            for address in self.vec.clone() {
+                                ui.label(format!("{}", address));
+                            }
+                        });
+                    }                                        
                     if ui.button("Enter").clicked() {
                         let process = process::Process::new(name).unwrap();
-                        self.value = process.read_mem(
+                        /*self.value = process.read_mem(
                             usize::from_str_radix(&self.address
                                                   .strip_prefix("0x")
-                                                  .unwrap(), 16).unwrap()).unwrap();
+                                                  .unwrap(), 16).unwrap()).unwrap();*/
                     };
                     ui.label(format!("Process_name: {}, pid: {}, address: {}, value: {}",
                                      name, self.pid, self.address, self.value));
