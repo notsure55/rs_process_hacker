@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::os::unix::prelude::FileExt;
 use std::io;
 use std::fs;
 
@@ -10,9 +11,8 @@ pub struct Process {
     handle: fs::File,
 }
 
-// BTreeMap<String, u32>
-
-pub fn select_process() -> io::Result<()> {
+pub fn select_process() -> io::Result<BTreeMap<u32, String>> {    
+    let mut map: BTreeMap<u32, String> = BTreeMap::new();
     for entry in fs::read_dir("/proc/")? {
         let dir = entry?;
         let stat_path = format!("{}/stat", dir.path().display());
@@ -20,10 +20,11 @@ pub fn select_process() -> io::Result<()> {
             Ok(content) => content,
             Err(_e) => continue,
         };
-        let stored: Vec<&str> = content.split(&['(', ')']).collect();
-        println!("{}, {}", stored[1], stored[0]);
+        let stored: Vec<&str> = content.split(&['(', ')']).collect();        
+        map.insert(stored[0].trim().parse::<u32>().unwrap(), stored[1].to_owned());
     }
-    Ok(())
+    
+    Ok(map)
 }
 
 impl Process {
@@ -52,8 +53,9 @@ impl Process {
         let stored: Vec<&str> = content.split('\n').collect();
         for line in stored {
             let line: Vec<&str> = line.split(&['-', ' ']).collect();
-            if line[2].contains("r") {
-                if line.len() > 2 {
+            if line.len() > 3 {
+                if line[2].contains("r") {
+                    
                     map.insert(usize::from_str_radix(line[0], 16).unwrap(), usize::from_str_radix(line[1], 16).unwrap());
                 }            
             }            
@@ -63,6 +65,39 @@ impl Process {
     // look how concise this is lmao.
     fn find_handle(pid: u32) -> Result<fs::File, io::Error> {
         Ok(fs::File::open(format!("/proc/{}/mem", pid))?)
+    }
+    pub fn find_value<T: Copy + PartialEq>(&self, value: T) -> Result<Vec<usize>, io::Error> {
+        let mut address_vec = Vec::new();
+        for (start_address, end_address) in self.maps.clone() {
+            let mut address = start_address;
+            // make sure address doesnt access invalid mem
+            while address != end_address - std::mem::size_of::<T>() {
+                let mut buf = vec![0u8; std::mem::size_of::<T>()];
+                self.handle.read_at(&mut buf, address as u64)?;              
+                let ptr = buf.as_ptr() as *const T;
+                let read_value = unsafe {
+                    ptr.read_unaligned()
+                };
+                if read_value == value {
+                    address_vec.push(address);
+                }
+                address += 1;
+            }            
+        }
+        if address_vec.is_empty() {
+            Err(io::Error::new(io::ErrorKind::NotFound, "No Values Found"))
+        } else {
+            return Ok(address_vec)
+        }                
+    }
+    pub fn read_mem<T: Copy>(&self, address: usize) -> Result<T, io::Error> {
+        let mut buf = vec![0u8; std::mem::size_of::<T>()];                
+        self.handle.read_at(&mut buf, address as u64)?;
+
+        let ptr = buf.as_ptr() as *const T;
+        unsafe {
+            Ok(ptr.read_unaligned())
+        }        
     }
     pub fn new(name: &str) -> Result<Self, io::Error> {
         let pid = Self::find_pid(name)?;

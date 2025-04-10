@@ -3,8 +3,18 @@ use std::io::Result;
 mod process;
 mod window;
 
-fn main() -> Result<()> {
-    let process = process::Process::new("linux_64_client")?;
-    println!("{:?}", process);
+fn main() -> Result<()> {    
+    //env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([640.0, 400.0]) // wide enough for the drag-drop overlay text
+            .with_drag_and_drop(true),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "Native file dialogs and drag-and-drop files",
+        options,
+        Box::new(|_cc| Ok(Box::<window::MyApp>::default())),
+    );    
     Ok(())
 }
