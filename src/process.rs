@@ -109,11 +109,20 @@ impl Process {
         }                        
         return Ok(address_map)            
     }
+    pub fn find_value_repeat<T: Pod + PartialEq + std::fmt::Display>(&self, new_value: T, addresses: &mut BTreeMap<usize, Type>) -> Result<(), io::Error> {        
+        for (address, type_of_var) in addresses.clone() {
+            let value: T = self.read_mem(address).expect("Failed to read_address");            
+            if new_value != value {                
+                addresses.remove(&address);
+            }
+        }
+        Ok(())
+    }
     pub fn read_mem<T: Copy + Pod>(&self, address: usize) -> Result<T, Box<dyn std::error::Error>> {
         let mut buf = vec![0u8; std::mem::size_of::<T>()];                
         self.handle.as_ref()
             .unwrap()
-            .read_at(&mut buf, address as u64)?;
+            .read_exact_at(&mut buf, address as u64)?;
 
         let read_value: T = * bytemuck::try_from_bytes(&buf[0..std::mem::size_of::<T>()])
             .map_err(|err| eprintln!("Failed to read value from address: 0x{:x} ERROR: {}", address, err))
