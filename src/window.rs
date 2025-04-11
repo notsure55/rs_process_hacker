@@ -1,8 +1,8 @@
 use crate::process;
 use std::collections::BTreeMap;
 
-#[derive(Default, Clone)]
-enum Type {
+#[derive(Debug, Default, Clone)]
+pub enum Type {
     #[default]
     Integer,
     Float,
@@ -11,13 +11,13 @@ enum Type {
 
 #[derive(Default)]
 pub struct MyApp {
-    name: Option<String>,
-    pid: u32,
-    address: String,    
+    name: Option<String>,        
+    addresses: BTreeMap<usize, Type>,    
+    process: process::Process,    
     guess: String,
     value: String,
-    addresses: BTreeMap<String, Type>,
-    vec: Vec<usize>,
+    type_of_var: Type,
+    show_types: bool,
 }
 
 // TODO: implement grid, to store addresses for further inspection,
@@ -28,32 +28,77 @@ impl eframe::App for MyApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("My egui Application");            
             match self.name {
-                Some(ref name) =>
+                Some(ref _name) =>
                 {                                                            
                     ui.horizontal(|ui| {                        
-                        let name_label = ui.label("Your value: ");
+                        let name_label = ui.label("Search value: ");
                         ui.text_edit_singleline(&mut self.value)
                             .labelled_by(name_label.id);
-                    });
-                    
-                    if ui.button("Search").clicked() {
-                        let process = process::Process::new(name).unwrap();
-                        self.vec = process.find_value(100).unwrap();
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            for address in self.vec.clone() {
-                                ui.label(format!("{}", address));
+                        ui.label(format!("{:?}", self.type_of_var));
+                        if ui.button(format!("Choose type")).clicked() {
+                            self.show_types = !self.show_types;
+                        }
+                        if self.show_types {
+                            if ui.button(format!("I32")).clicked() {
+                                self.type_of_var = Type::Integer;
+                                self.show_types = !self.show_types;
                             }
+                            if ui.button(format!("F32")).clicked() {
+                                self.type_of_var = Type::Float;
+                                self.show_types = !self.show_types;
+                            }
+                        }
+                    });
+                    if ui.button("Scan").clicked() {
+                        if !self.addresses_is_empty() {
+                            Type::Integer => {                                
+                                let value: i32 = self.value.trim().parse().expect("Failed to parse value string");
+                                self.addresses = self.process.find_value(value, self.addresses).expect("Failed to find value");
+                            },
+                            Type::Float => {
+                                let value: f32 = self.value.trim().parse().expect("Failed to parse value string");
+                                self.addresses = self.process.find_value(value, self.addresses).expect("Failed to find value");
+                            }
+                        }
+                        match &self.type_of_var {
+                            Type::Integer => {                                
+                                let value: i32 = self.value.trim().parse().expect("Failed to parse value string");
+                                self.addresses = self.process.find_value(value).expect("Failed to find value");
+                            },
+                            Type::Float => {
+                                let value: f32 = self.value.trim().parse().expect("Failed to parse value string");
+                                self.addresses = self.process.find_value(value).expect("Failed to find value");
+                            }
+                            _ => eprintln!("WRONG TYPE"),
+                        }                                                
+                    }
+                    if !self.addresses.is_empty() {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            egui::Grid::new("Addresses").show(ui, |ui| {                            
+                                for (address, value_type) in &mut self.addresses {
+                                    match value_type {
+                                        Type::Integer => {
+                                            let value: i32 = self.process.read_mem(*address).unwrap();
+                                            if ui.button(format!("{:?}", value_type)).clicked() {
+                                                *value_type =  Type::Float;
+                                            }
+                                            ui.label(format!("Address: 0x{:x} | Value:{}", address,value));
+                                            ui.end_row();                                            
+                                        },
+                                        Type::Float => {
+                                            let value: f32 = self.process.read_mem(*address).unwrap();
+                                            if ui.button(format!("{:?}", value_type)).clicked() {
+                                                *value_type =  Type::Integer;
+                                            }
+                                            ui.label(format!("Address: 0x{:x} | Value:{}", address,value));
+                                            ui.end_row();                                            
+                                        }
+                                        _ => eprintln!("WRONG TYPE"),
+                                    }                                    
+                                }
+                            });                            
                         });
-                    }                                        
-                    if ui.button("Enter").clicked() {
-                        let process = process::Process::new(name).unwrap();
-                        /*self.value = process.read_mem(
-                            usize::from_str_radix(&self.address
-                                                  .strip_prefix("0x")
-                                                  .unwrap(), 16).unwrap()).unwrap();*/
-                    };
-                    ui.label(format!("Process_name: {}, pid: {}, address: {}, value: {}",
-                                     name, self.pid, self.address, self.value));
+                    }                                                  
                 },
                 None =>
                 {
@@ -65,8 +110,8 @@ impl eframe::App for MyApp {
                         for (pid, process_name) in map {
                             if process_name.contains(&self.guess) {
                                 if ui.button(format!("Process_name: {}, pid: {}", process_name, pid)).clicked() {
-                                    self.name = Some(process_name);
-                                    self.pid = pid;
+                                    self.name = Some(process_name.clone());                                    
+                                    self.process = process::Process::new(&process_name).unwrap();
                                     break
                                 }
                             }                    

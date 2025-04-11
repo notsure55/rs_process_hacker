@@ -11,7 +11,7 @@ fn main() -> Result<()> {
             .with_drag_and_drop(true),
         ..Default::default()
     };
-    eframe::run_native(
+    let _ = eframe::run_native(
         "Native file dialogs and drag-and-drop files",
         options,
         Box::new(|_cc| Ok(Box::<window::MyApp>::default())),

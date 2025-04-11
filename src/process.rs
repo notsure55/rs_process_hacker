@@ -3,13 +3,14 @@ use std::os::unix::prelude::FileExt;
 use std::io;
 use std::fs;
 use bytemuck::Pod;
+use crate::window::Type;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Process {
     pid: u32,
     name: String,
     maps: BTreeMap<usize, usize>,
-    handle: fs::File,
+    handle: Option<fs::File>,
 }
 
 pub fn select_process() -> io::Result<BTreeMap<u32, String>> {    
@@ -51,13 +52,23 @@ impl Process {
             Err(e) => return Err(e) 
         };
         let mut map: BTreeMap<usize, usize> = BTreeMap::new();
-        let stored: Vec<&str> = content.split('\n').collect();
+        let stored: Vec<&str> = content.split('\n').collect();        
         for line in stored {
+            if line.contains("[vvar]") || line.contains("[vvar_vclock]") {
+                continue
+            }
             let line: Vec<&str> = line.split(&['-', ' ']).collect();
             if line.len() > 3 {
                 if line[2].contains("r") {
                     
-                    map.insert(usize::from_str_radix(line[0], 16).unwrap(), usize::from_str_radix(line[1], 16).unwrap());
+                    let start_address = usize::from_str_radix(line[0], 16).unwrap();
+                    let end_address = usize::from_str_radix(line[1], 16).unwrap();
+                    
+                    if start_address > end_address {
+                        continue;
+                    } else {
+                        map.insert(start_address, end_address);
+                    }                    
                 }            
             }            
         }
@@ -68,39 +79,52 @@ impl Process {
         Ok(fs::File::open(format!("/proc/{}/mem", pid))?)
     }
     // we add pod to traits or else we cant use try_from_bytes
-    pub fn find_value<T: Copy + PartialEq + Pod>(&self, value: T) -> Result<Vec<usize>, io::Error> {
-        let mut address_vec = Vec::new();
+    pub fn find_value<T: Copy + PartialEq + Pod>(&self, value: T) -> Result<BTreeMap<usize, Type>, io::Error> {
+        let mut value_type = Type::default();
+        match std::any::type_name::<T>() {
+            "i32" => value_type = Type::Integer,
+            "f32" => value_type = Type::Float,
+            _ => value_type = Type::default(),            
+        };
+        let mut address_map: BTreeMap<usize, Type> = BTreeMap::new();
         for (start_address, end_address) in self.maps.clone() {            
-            // make sure address doesnt access invalid mem
-            let size = end_address - start_address;
+            // we get size of the address space that we want to read from per /proc/pid/maps
+            let size: usize = end_address - start_address;
+            let mut buf = vec![0u8; size];            
+            self.handle.as_ref()
+                .unwrap()
+                .read_exact_at(&mut buf, start_address as u64)
+                .expect(&format!("Failed to read from 0x{start_address:x}-0x{end_address:x}"));            
             for i in 0..=(size - std::mem::size_of::<T>()) {
-                let mut buf = vec![0u8; size];
-                self.handle.read_at(&mut buf, start_address as u64)?;
-                let read_value: T = *bytemuck::try_from_bytes(&buf[i..=(std::mem::size_of::<T>() + i)]).unwrap(); 
-                if read_value == value {
-                    address_vec.push(i + start_address);
+                // if the value aligns to our type we derefrence it and store in read_value then compare to input value
+                let read_value: T = match bytemuck::try_from_bytes(&buf[i..(std::mem::size_of::<T>() + i)]) {
+                    Ok(value) => *value,
+                    Err(_) => continue,
+                };
+                
+                if read_value == value {                    
+                    address_map.insert(i + start_address, value_type.clone());
                 }                
             }            
-        }
-        if address_vec.is_empty() {
-            Err(io::Error::new(io::ErrorKind::NotFound, "No Values Found"))
-        } else {
-            return Ok(address_vec)
-        }                
+        }                        
+        return Ok(address_map)            
     }
-    pub fn read_mem<T: Copy>(&self, address: usize) -> Result<T, io::Error> {
+    pub fn read_mem<T: Copy + Pod>(&self, address: usize) -> Result<T, Box<dyn std::error::Error>> {
         let mut buf = vec![0u8; std::mem::size_of::<T>()];                
-        self.handle.read_at(&mut buf, address as u64)?;
+        self.handle.as_ref()
+            .unwrap()
+            .read_at(&mut buf, address as u64)?;
 
-        let ptr = buf.as_ptr() as *const T;
-        unsafe {
-            Ok(ptr.read_unaligned())
-        }        
+        let read_value: T = * bytemuck::try_from_bytes(&buf[0..std::mem::size_of::<T>()])
+            .map_err(|err| eprintln!("Failed to read value from address: 0x{:x} ERROR: {}", address, err))
+            .unwrap();
+        
+        Ok(read_value)
     }
     pub fn new(name: &str) -> Result<Self, io::Error> {
         let pid = Self::find_pid(name)?;
         let maps = Self::find_maps(pid)?;
-        let handle = Self::find_handle(pid)?;
+        let handle = Some(Self::find_handle(pid)?);
         Ok(Process {
             pid,
             name: name.to_string(),
