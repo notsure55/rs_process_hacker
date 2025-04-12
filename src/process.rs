@@ -4,6 +4,8 @@ use std::io;
 use std::fs;
 use bytemuck::Pod;
 use crate::window::Type;
+use std::fs::OpenOptions;
+use std::io::{Seek, SeekFrom, Write,};
 
 #[derive(Debug, Default)]
 pub struct Process {
@@ -76,7 +78,14 @@ impl Process {
     }
     // look how concise this is lmao.
     fn find_handle(pid: u32) -> Result<fs::File, io::Error> {
-        Ok(fs::File::open(format!("/proc/{}/mem", pid))?)
+        // opening mem file with correct permissions so we can write to it or else invald handle :P
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(format!("/proc/{}/mem", pid))?;
+        
+        Ok(file)        
     }
     // we add pod to traits or else we cant use try_from_bytes
     pub fn find_value<T: Copy + PartialEq + Pod>(&self, value: T) -> Result<BTreeMap<usize, Type>, io::Error> {
@@ -129,6 +138,11 @@ impl Process {
             .unwrap();
         
         Ok(read_value)
+    }
+    pub fn write_mem<T: Copy + Pod >(&self, address: usize, value: T) -> Result<(), io::Error> {        
+        let buf = bytemuck::bytes_of(&value);        
+        self.handle.as_ref().unwrap().write_at(&buf, address as u64);
+        Ok(())
     }
     pub fn new(name: &str) -> Result<Self, io::Error> {
         let pid = Self::find_pid(name)?;

@@ -12,7 +12,10 @@ pub enum Type {
 #[derive(Debug)]
 struct StoredValue {
     address: String,
-    value: i32,
+    value: String,
+    address_usize: usize,
+    type_of_var: Type,
+    type_list: bool,
 }
 
 #[derive(Default, Debug)]
@@ -96,10 +99,13 @@ impl MyApp {
                         Type::Integer => {
                             let value: i32 = self.process.read_mem(*address).unwrap();                            
                             ui.label(format!("Address: 0x{:x} | {:?}:Value:{}", address, value_type, value ));
-                            if ui.button("Save").clicked() {
+                            if ui.button("Save").clicked() { // address.clone().to_string()
                                 let stored_value = StoredValue {
-                                    address: address.clone().to_string(),
-                                    value: value,                                    
+                                    address: format!("{:x}", address.clone()),
+                                    address_usize: address.clone(),
+                                    value: value.to_string(),
+                                    type_of_var: value_type.clone(),
+                                    type_list: false,
                                 };
                                 self.saved_addresses.push(stored_value);
                                 self.addresses.remove(&address);
@@ -141,21 +147,57 @@ impl MyApp {
     }
     fn show_saved_addresses(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) -> Result<(), Box<dyn std::error::Error>> {
         egui::ScrollArea::vertical().id_salt("scroll_area_1").auto_shrink([false; 2]).show(ui, |ui| {
-            egui::Grid::new("Saved Addresses").spacing(egui::vec2(10.0, 6.0)).show(ui, |ui| {                
-                for stored in self.saved_addresses.iter_mut() {                                                            
-                    /*if ui.button(format!("{:?}", value_type)).clicked() {
-                     *value_type =  Type::Float;
-                    }*/                    
-                    let value_label = ui.label(format!("Address:{} | Value:{}", stored.address, stored.value));
-                    let response = ui.text_edit_singleline(&mut stored.address)
-                        .labelled_by(value_label.id);
-                    if response.lost_focus() {
-                        stored.value = self.process.read_mem(usize::from_str_radix(&stored.address.clone(), 16).unwrap()).unwrap();
+            egui::Grid::new("Saved Addresses").min_col_width(75.0).spacing(egui::vec2(10.0, 6.0)).show(ui, |ui| {
+                for stored in self.saved_addresses.iter_mut() {
+                    if stored.type_list {
+                        if ui.button("I32").clicked() {
+                            stored.type_of_var = Type::Integer
+                        }
+                        if ui.button("F32").clicked() {
+                            stored.type_of_var = Type::Float;
+                        }
+                    }                    
+                    // ADDRESS                    
+                    let response = ui.add(egui::TextEdit::singleline(&mut stored.address)
+                                          .frame(false).desired_width(ui.available_width()));
+
+                    // if let statements go hard
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        if let Ok(addr) = usize::from_str_radix(&stored.address.clone().trim(), 16) {
+                            stored.address_usize = addr;                                                                     
+                        }                        
                     }
-                    ui.end_row();                                                            
+
+                    // VALUE
+                    let response = ui.add(egui::TextEdit::singleline(&mut stored.value)
+                                          .frame(false).desired_width(ui.available_width()));
+
+                    // editing the value                                        
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        if let Ok(parsed) = stored.value.trim().parse::<i32>() {
+                            let value: i32 = parsed;
+                            println!("0x{:x}", stored.address_usize);
+                            self.process.write_mem(stored.address_usize, value)
+                                .expect("failed to write to memory");
+                        }                        
+                    }
+                    // when not editing value, constantly read from mem for real time update
+                    else if !response.has_focus() {
+                        
+                        let value: i32 = self.process.read_mem(stored.address_usize)
+                            .expect("Failed to unwrap read_mem");
+
+                        stored.value = value.to_string();
+                    }
+                                                            
+                    
+                    if ui.button(format!("{:?}", stored.type_of_var)).clicked() {
+                        stored.type_list =  !stored.type_list;
+                    }
+                    
+                    ui.end_row();
                 }
-                
-            });                            
+            });
         });
         
         Ok(())
@@ -173,7 +215,7 @@ impl eframe::App for MyApp {
 
                     egui::Grid::new("Black").show(ui, |ui| {
                         let mut size = ui.spacing().interact_size;
-                        size.x = 200.0;
+                        size.x = 300.0;
                         size.y = 200.0;
                         ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Min), |ui| {
                             if !self.addresses.is_empty() {                            
