@@ -1,7 +1,7 @@
 use crate::process;
 use std::collections::BTreeMap;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub enum Type {
     #[default]
     Integer,
@@ -14,8 +14,7 @@ struct StoredValue {
     address: String,
     value: String,
     address_usize: usize,
-    type_of_var: Type,
-    type_list: bool,
+    type_of_var: Type,    
 }
 
 #[derive(Default, Debug)]
@@ -104,8 +103,7 @@ impl MyApp {
                                     address: format!("{:x}", address.clone()),
                                     address_usize: address.clone(),
                                     value: value.to_string(),
-                                    type_of_var: value_type.clone(),
-                                    type_list: false,
+                                    type_of_var: value_type.clone(),                                    
                                 };
                                 self.saved_addresses.push(stored_value);
                                 self.addresses.remove(&address);
@@ -145,57 +143,73 @@ impl MyApp {
         
         Ok(())
     }
+    fn show_stored_value(process : &process::Process, _ctx: &egui::Context, ui: &mut egui::Ui, stored: &mut StoredValue) {
+        // ADDRESS                    
+        let response = ui.add(egui::TextEdit::singleline(&mut stored.address)
+                              .frame(true).desired_width(ui.available_width()));
+        // if let statements go hard
+        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            if let Ok(addr) = usize::from_str_radix(&stored.address.clone().trim(), 16) {
+                stored.address_usize = addr;                                                                     
+            }                        
+        }
+        // VALUE
+        let response = ui.add(egui::TextEdit::singleline(&mut stored.value)
+                              .frame(true).desired_width(ui.available_width()));
+        
+        match stored.type_of_var {
+            Type::Integer =>
+            {                                                               
+                // editing the value                                        
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if let Ok(parsed) = stored.value.trim().parse::<i32>() {
+                        let value: i32 = parsed;
+                        println!("0x{:x}", stored.address_usize);
+                        process.write_mem(stored.address_usize, value)
+                            .expect("failed to write to memory");
+                    }
+                }
+                // when not editing value, constantly read from mem for real time update
+                else if !response.has_focus() {                    
+                    let value: i32 = process.read_mem(stored.address_usize)
+                        .expect("Failed to unwrap read_mem");
+                    stored.value = value.to_string();
+                }                                                
+            }
+            Type::Float =>
+            {
+                // editing the value                                        
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if let Ok(parsed) = stored.value.trim().parse::<f32>() {
+                        let value: f32 = parsed;
+                        println!("0x{:x}", stored.address_usize);
+                        process.write_mem(stored.address_usize, value)
+                            .expect("failed to write to memory");
+                    }
+                }
+                // when not editing value, constantly read from mem for real time update
+                else if !response.has_focus() {                    
+                    let value: f32 = process.read_mem(stored.address_usize)
+                        .expect("Failed to unwrap read_mem");
+                    stored.value = value.to_string();
+                }
+            }
+            _ => eprintln!("WRONG")
+        }                                
+        egui::ComboBox::from_id_salt(format!("{}", stored.address))
+            .selected_text(format!("{:?}", stored.type_of_var))
+            .show_ui(ui, |ui| {
+             ui.selectable_value(&mut stored.type_of_var, Type::Integer, "I32");
+             ui.selectable_value(&mut stored.type_of_var, Type::Float, "F32");                
+        });
+        
+        ui.end_row();
+    }
     fn show_saved_addresses(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) -> Result<(), Box<dyn std::error::Error>> {
         egui::ScrollArea::vertical().id_salt("scroll_area_1").auto_shrink([false; 2]).show(ui, |ui| {
-            egui::Grid::new("Saved Addresses").min_col_width(75.0).spacing(egui::vec2(10.0, 6.0)).show(ui, |ui| {
+            egui::Grid::new("Saved Addresses").min_col_width(75.0).spacing(egui::vec2(2.0, 6.0)).show(ui, |ui| {               
                 for stored in self.saved_addresses.iter_mut() {
-                    if stored.type_list {
-                        if ui.button("I32").clicked() {
-                            stored.type_of_var = Type::Integer
-                        }
-                        if ui.button("F32").clicked() {
-                            stored.type_of_var = Type::Float;
-                        }
-                    }                    
-                    // ADDRESS                    
-                    let response = ui.add(egui::TextEdit::singleline(&mut stored.address)
-                                          .frame(false).desired_width(ui.available_width()));
-
-                    // if let statements go hard
-                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        if let Ok(addr) = usize::from_str_radix(&stored.address.clone().trim(), 16) {
-                            stored.address_usize = addr;                                                                     
-                        }                        
-                    }
-
-                    // VALUE
-                    let response = ui.add(egui::TextEdit::singleline(&mut stored.value)
-                                          .frame(false).desired_width(ui.available_width()));
-
-                    // editing the value                                        
-                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        if let Ok(parsed) = stored.value.trim().parse::<i32>() {
-                            let value: i32 = parsed;
-                            println!("0x{:x}", stored.address_usize);
-                            self.process.write_mem(stored.address_usize, value)
-                                .expect("failed to write to memory");
-                        }                        
-                    }
-                    // when not editing value, constantly read from mem for real time update
-                    else if !response.has_focus() {
-                        
-                        let value: i32 = self.process.read_mem(stored.address_usize)
-                            .expect("Failed to unwrap read_mem");
-
-                        stored.value = value.to_string();
-                    }
-                                                            
-                    
-                    if ui.button(format!("{:?}", stored.type_of_var)).clicked() {
-                        stored.type_list =  !stored.type_list;
-                    }
-                    
-                    ui.end_row();
+                    Self::show_stored_value(&self.process, _ctx, ui, stored);
                 }
             });
         });
