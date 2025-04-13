@@ -9,7 +9,7 @@ use std::fs::OpenOptions;
 #[derive(Debug, Default)]
 pub struct Process {
     pid: u32,
-    name: String,
+    pub name: Option<String>,
     maps: BTreeMap<usize, usize>,
     handle: Option<fs::File>,
 }
@@ -78,7 +78,7 @@ impl Process {
     // look how concise this is lmao.
     fn find_handle(pid: u32) -> Result<fs::File, io::Error> {
         // opening mem file with correct permissions so we can write to it or else invald handle :P
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
@@ -87,12 +87,11 @@ impl Process {
         Ok(file)        
     }
     // we add pod to traits or else we cant use try_from_bytes
-    pub fn find_value<T: Copy + PartialEq + Pod>(&self, value: T) -> Result<BTreeMap<usize, Type>, io::Error> {
-        let mut value_type = Type::default();
-        match std::any::type_name::<T>() {
-            "i32" => value_type = Type::Integer,
-            "f32" => value_type = Type::Float,
-            _ => value_type = Type::default(),            
+    pub fn find_value<T: Copy + PartialEq + Pod>(&self, value: T) -> Result<BTreeMap<usize, Type>, io::Error> {        
+        let value_type = match std::any::type_name::<T>() {
+            "i32" => Type::Integer,
+            "f32" => Type::Float,
+            _ => Type::default(),            
         };
         let mut address_map: BTreeMap<usize, Type> = BTreeMap::new();
         for (start_address, end_address) in self.maps.clone() {            
@@ -118,7 +117,7 @@ impl Process {
         return Ok(address_map)            
     }
     pub fn find_value_repeat<T: Pod + PartialEq + std::fmt::Display>(&self, new_value: T, addresses: &mut BTreeMap<usize, Type>) -> Result<(), io::Error> {        
-        for (address, type_of_var) in addresses.clone() {
+        for (address, _) in addresses.clone() {
             let value: T = self.read_mem(address).expect("Failed to read_address");            
             if new_value != value {                
                 addresses.remove(&address);
@@ -140,7 +139,7 @@ impl Process {
     }    
     pub fn write_mem<T: Copy + Pod >(&self, address: usize, value: T) -> Result<(), io::Error> {        
         let buf = bytemuck::bytes_of(&value);        
-        self.handle.as_ref().unwrap().write_at(&buf, address as u64);
+        let _ = self.handle.as_ref().unwrap().write_at(&buf, address as u64);
         Ok(())
     }
     pub fn new(name: &str) -> Result<Self, io::Error> {
@@ -149,7 +148,7 @@ impl Process {
         let handle = Some(Self::find_handle(pid)?);
         Ok(Process {
             pid,
-            name: name.to_string(),
+            name: Some(name.to_string()),
             maps,
             handle
         })

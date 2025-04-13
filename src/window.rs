@@ -6,18 +6,16 @@ pub enum Type {
     #[default]
     Integer,
     Float,
-    Address,
 }
 
 #[derive(Debug)]
 struct StoredValue {
+    name: String,
     address: String,
     value: String,
     address_usize: usize,
     type_of_var: Type,    
 }
-
-
 
 #[derive(Default, Debug)]
 pub struct MyApp {
@@ -33,8 +31,21 @@ pub struct MyApp {
     new_address: String,
 }
 
-// TODO: implement grid, to store addresses for further inspection,
-// display all addresses with the value of current, and initial value when searching.
+impl StoredValue {
+    pub fn new(address: String) -> Self {
+        let address_usize: usize = usize::from_str_radix(address.clone()
+            .trim(), 16)
+            .expect(&format!("Failed to parse address: {}", address.clone()));
+        
+        Self {
+            name: String::new(),
+            address: address,
+            value: String::new(),
+            address_usize: address_usize,
+            type_of_var: Type::default(),
+        }
+    }
+}
 
 impl MyApp {
     fn scan_value(&mut self) {
@@ -47,8 +58,7 @@ impl MyApp {
                 Type::Float => {
                     let value: f32 = self.value.trim().parse().expect("Failed to parse value string");
                     self.process.find_value_repeat(value, &mut self.addresses).expect("Failed to find value");                    
-                },
-                _ => eprintln!("Black"),
+                },                
             }            
         } else {
             match &self.type_of_var {
@@ -59,8 +69,7 @@ impl MyApp {
                 Type::Float => {
                     let value: f32 = self.value.trim().parse().expect("Failed to parse value string");
                     self.addresses = self.process.find_value(value).expect("Failed to find value");
-                }
-                _ => eprintln!("WRONG TYPE"),
+                },                
             }
         }
     }
@@ -95,20 +104,8 @@ impl MyApp {
             }
             if self.add_new_address {
                 let response = ui.add(egui::TextEdit::singleline(&mut self.new_address).desired_width(75.0));
-                                                     
-                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    
-                    let address_usize: usize = usize::from_str_radix(&self.new_address.clone()
-                                                                     .trim(), 16).expect("Failed to parse new_address");
-                    
-                    let new_address = StoredValue {
-                        address: self.new_address.clone(),
-                        value: String::new(),
-                        address_usize,
-                        type_of_var: Type::default(),
-                    };
-                    
-                    self.saved_addresses.push(new_address);
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {                                     
+                    self.saved_addresses.push(StoredValue::new(self.new_address.clone()));
                 }
             }
             ui.end_row();                                            
@@ -126,17 +123,9 @@ impl MyApp {
                             let value: i32 = self.process.read_mem(*address).unwrap();
                             ui.label(format!("Address: 0x{:x} | {:?}:Value:{}", address, value_type, value));
                             
-                            if ui.button("Save").clicked() { 
-                                
-                                let stored_value = StoredValue {
-                                    address: format!("{:x}", address.clone()),
-                                    address_usize: address.clone(),
-                                    value: value.to_string(),
-                                    type_of_var: value_type.clone(),                                    
-                                };
-
+                            if ui.button("Save").clicked() {                                 
                                 // store addresses, and remove from stack
-                                self.saved_addresses.push(stored_value);
+                                self.saved_addresses.push(StoredValue::new(format!("{:x}", address.clone())));
                                 self.addresses.remove(&address);
                             }
                         },
@@ -145,20 +134,11 @@ impl MyApp {
                             ui.label(format!("Address: 0x{:x} | {:?}:Value:{}", address, value_type, value));
                             
                             if ui.button("Save").clicked() {
-                                                                
-                                let stored_value = StoredValue {
-                                    address: format!("{:x}", address.clone()),
-                                    address_usize: address.clone(),
-                                    value: value.to_string(),
-                                    type_of_var: value_type.clone(),                                    
-                                };
-
                                 // store addresses, and remove from stack
-                                self.saved_addresses.push(stored_value);
-                                self.addresses.remove(&address);
+                                self.saved_addresses.push(StoredValue::new(format!("{:x}", address.clone())));
+                                self.addresses.remove(&address);                                
                             }
-                        },
-                        _ => eprintln!("WRONG TYPE"),
+                        },                        
                     }                    
                     ui.end_row();                                            
                     if count > 100 { break; }
@@ -176,9 +156,8 @@ impl MyApp {
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (pid, process_name) in map {
                 if process_name.contains(&self.guess) {
-                    if ui.button(format!("Process_name: {}, pid: {}", process_name, pid)).clicked() {
-                        self.name = Some(process_name.clone());                                    
-                        self.process = process::Process::new(&process_name).unwrap();
+                    if ui.button(format!("Process_name: {}, pid: {}", process_name, pid)).clicked() {                        
+                        self.process = process::Process::new(&process_name).unwrap();                        
                         break
                     }
                 }                    
@@ -188,6 +167,9 @@ impl MyApp {
         Ok(())
     }
     fn show_stored_value(process : &process::Process, _ctx: &egui::Context, ui: &mut egui::Ui, stored: &mut StoredValue) {
+        // NAME
+        ui.add(egui::TextEdit::singleline(&mut stored.name)
+               .frame(true).desired_width(ui.available_width()));
         // ADDRESS                    
         let response = ui.add(egui::TextEdit::singleline(&mut stored.address)
                               .frame(true).desired_width(ui.available_width()));
@@ -237,8 +219,7 @@ impl MyApp {
                         .expect("Failed to unwrap read_mem");
                     stored.value = value.to_string();
                 }
-            }
-            _ => eprintln!("WRONG")
+            },            
         }                                
         egui::ComboBox::from_id_salt(format!("{}", stored.address))
             .selected_text(format!("{:?}", stored.type_of_var))
@@ -268,18 +249,21 @@ impl MyApp {
     }
 }
 
+// TODO: Add a memory viewer for addresses, and the ability to change values and types of values within the memoryspace
+// Basically adding reclass.net
+
 impl eframe::App for MyApp {    
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Rem Engine");            
-            match self.name {
+            match self.process.name {
                 Some(ref _name) =>
                 {
                     let _ = self.build_search_option(ctx, ui);
 
                     egui::Grid::new("Black").show(ui, |ui| {
                         let mut size = ui.spacing().interact_size;
-                        size.x = 400.0;
+                        size.x = 350.0;
                         size.y = 200.0;
                         ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Min), |ui| {
                             let _ = self.show_address_grid(ctx, ui);
