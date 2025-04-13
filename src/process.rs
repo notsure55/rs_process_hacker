@@ -137,7 +137,7 @@ impl Process {
             .unwrap();
         
         Ok(read_value)
-    }
+    }    
     pub fn write_mem<T: Copy + Pod >(&self, address: usize, value: T) -> Result<(), io::Error> {        
         let buf = bytemuck::bytes_of(&value);        
         self.handle.as_ref().unwrap().write_at(&buf, address as u64);
