@@ -19,6 +19,12 @@ pub enum SearchOptions {
     AddNewAddress,
 }
 
+#[derive(Debug, Default, PartialEq)]
+pub enum MemoryOptions {
+    #[default]
+    Bytes256,    
+}
+
 #[derive(Debug)]
 struct StoredValue {
     name: String,
@@ -56,6 +62,8 @@ pub struct MyApp {
     // MEMORY VIEWER STUFFS
     top_address: DisplayAddress,
     memory_viewer_toggle: bool,
+    memory_options: MemoryOptions,
+    memory_types: Vec<Type>,
 }
 
 impl StoredValue {
@@ -307,6 +315,7 @@ impl MyApp {
     }
     fn memory_viewer(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui)
     {
+        
         let response = ui.text_edit_singleline(&mut self.top_address.display);
         
         if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -314,20 +323,59 @@ impl MyApp {
             {
                 self.top_address.real = parsed;
                 self.memory_viewer_toggle = true;
+                match &self.memory_options {
+                    MemoryOptions::Bytes256 =>
+                    {
+                        self.memory_types = vec![Type::Integer; 256 / 4];
+                    },
+                }
             }                                        
         }
+        
+        egui::ComboBox::from_id_salt("Search_options_memory_box")
+            .selected_text("Options")
+            .show_ui(ui, |ui|{
 
-        egui::ComboBox::from_id_salt(format!("{}", stored.address))
-            .selected_text(format!("{:?}", stored.type_of_var))
-            .show_ui(ui, |ui| {
-             ui.selectable_value(&mut stored.type_of_var, Type::Integer, "I32");
-             ui.selectable_value(&mut stored.type_of_var, Type::Float, "F32");                
-            });
+                ui.selectable_value(&mut self.memory_options, MemoryOptions::Bytes256, "Bytes256");
+            });            
         
         egui::ScrollArea::vertical().id_salt("Memory_viewer").auto_shrink([false; 2]).show(ui, |ui| {
-            
-        });
-    }
+            egui::Grid::new("Memory Viewer").min_col_width(75.0).spacing(egui::vec2(2.0, 2.0)).show(ui, |ui| {
+                match &self.memory_options {
+                    MemoryOptions::Bytes256 =>
+                    {                                        
+                        for (n, mem_type) in self.memory_types.iter_mut().enumerate()
+                        {
+                            let address: usize = self.top_address.real + (n * 4);
+                            
+                            match &mem_type {
+                                Type::Integer =>
+                                {
+                                    
+                                    let value: i32 = self.process.read_mem(address)
+                                        .expect(&format!("Failed to read addresss: {:x}", address));
+                                    ui.label(format!("{:x} | {}", address, value));
+                                },
+                                Type::Float =>
+                                {
+                                    //
+                                },
+                            }
+
+                            egui::ComboBox::from_id_salt(format!("{}", address))
+                                .selected_text(format!("{:?}", mem_type))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(mem_type, Type::Integer, "I32");
+                                    ui.selectable_value(mem_type, Type::Float, "F32");
+                                });
+                            // per for loop
+                            ui.end_row();
+                        }                                                
+                    },
+                }
+            });
+        });        
+    }                                                                 
 }
 
 // TODO: Add a memory viewer for ses, and the ability to change values and types of values within the memoryspace
