@@ -8,6 +8,17 @@ pub enum Type {
     Float,
 }
 
+#[derive(Debug, Default, PartialEq)]
+pub enum SearchOptions {
+    #[default]
+    Nothing,
+    Scan,
+    NewScan,
+    Restart,
+    MemoryViewer,
+    AddNewAddress,
+}
+
 #[derive(Debug)]
 struct StoredValue {
     name: String,
@@ -18,17 +29,33 @@ struct StoredValue {
 }
 
 #[derive(Default, Debug)]
+struct DisplayAddress {
+    display: String,
+    real: usize,
+}
+
+#[derive(Default, Debug)]
 pub struct MyApp {
-    name: Option<String>,        
+    // WHERE ADDRESSES ARE STROED
     addresses: BTreeMap<usize, Type>,
     saved_addresses: Vec<StoredValue>,
+    
+    // PROCESS INPUT AND STUFFS
     process: process::Process,    
     guess: String,
-    value: String,
-    type_of_var: Type,    
     
+    // SCANNING
+    value: String,
+    type_of_var: Type,
+    type_option: SearchOptions,
+
+    // ADDING NEW ADDRESS    
     add_new_address: bool,
     new_address: String,
+
+    // MEMORY VIEWER STUFFS
+    top_address: DisplayAddress,
+    memory_viewer_toggle: bool,
 }
 
 impl StoredValue {
@@ -76,39 +103,70 @@ impl MyApp {
     fn build_search_option(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) -> Result<(), Box<dyn std::error::Error>> {
         egui::Grid::new("Top Options").max_col_width(150.0).spacing(egui::vec2(1.0, 2.0)).show(ui, |ui| {                      
             let name_label = ui.label("Search value: ");
-            ui.text_edit_singleline(&mut self.value)
+            let response = ui.text_edit_singleline(&mut self.value)
                 .labelled_by(name_label.id);
 
-            if ui.button("Restart").clicked() {
-                self.name = None;
+            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !self.value.is_empty() {            
+                self.scan_value();                   
             }
             
-            egui::ComboBox::from_id_salt("Search_option_combo_box")
+            egui::ComboBox::from_id_salt("Search_type_combo_box")
                 .selected_text(format!("{:?}", self.type_of_var))
                 .show_ui(ui, |ui|{
                     
-                ui.selectable_value(&mut self.type_of_var, Type::Integer, "I32");
-                ui.selectable_value(&mut self.type_of_var, Type::Float, "F32");                
-            });
+                    ui.selectable_value(&mut self.type_of_var, Type::Integer, "I32");
+                    ui.selectable_value(&mut self.type_of_var, Type::Float, "F32");                
+                });
+
+            egui::ComboBox::from_id_salt("Search_options_combo_box")
+                .selected_text("Options")
+                .show_ui(ui, |ui|{
+
+                    ui.selectable_value(&mut self.type_option, SearchOptions::Nothing, "Nothing");
+                    ui.selectable_value(&mut self.type_option, SearchOptions::Scan, "Scan");
+                    ui.selectable_value(&mut self.type_option, SearchOptions::NewScan, "NewScan");
+                    ui.selectable_value(&mut self.type_option, SearchOptions::Restart, "Restart");
+                    ui.selectable_value(&mut self.type_option, SearchOptions::MemoryViewer, "MemoryViewer");
+                    ui.selectable_value(&mut self.type_option, SearchOptions::AddNewAddress, "AddNewAddress");                
+                });
             
-            if ui.button("New Scan").clicked() {
-                self.addresses = BTreeMap::new();
-            }
-            if ui.button("Scan").clicked() {
-                if !self.value.is_empty() {
-                    self.scan_value();
-                }              
-            }
-            if ui.button("Add new Address").clicked() {
-                self.add_new_address = !self.add_new_address;
-            }
-            if self.add_new_address {
-                let response = ui.add(egui::TextEdit::singleline(&mut self.new_address).desired_width(75.0));
-                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {                                     
-                    self.saved_addresses.push(StoredValue::new(self.new_address.clone()));
-                }
-            }
-            ui.end_row();                                            
+            match &self.type_option {
+                SearchOptions::Nothing =>
+                {
+                    // do nothing
+                },
+                SearchOptions::Scan =>
+                {
+                    if !self.value.is_empty() {
+                        self.scan_value();
+                    }
+                    self.type_option = SearchOptions::Nothing;
+                }, 
+                SearchOptions::NewScan =>
+                {
+                    self.addresses = BTreeMap::new();
+                    self.type_option = SearchOptions::Nothing;
+                },
+                SearchOptions::Restart =>
+                {
+                    self.process.name = None;
+                    self.type_option = SearchOptions::Nothing;
+                },
+                SearchOptions::MemoryViewer =>
+                {
+                    // TODO: implement memviewer
+                },
+                SearchOptions::AddNewAddress =>
+                {
+                    let response = ui.add(egui::TextEdit::singleline(&mut self.new_address).desired_width(75.0));
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {                                     
+                        self.saved_addresses.push(StoredValue::new(self.new_address.clone()));
+                    }
+                },
+            };
+                                                                        
+            ui.end_row();
+            
         });
                 
         Ok(())
@@ -247,9 +305,32 @@ impl MyApp {
         
         Ok(())
     }
+    fn memory_viewer(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui)
+    {
+        let response = ui.text_edit_singleline(&mut self.top_address.display);
+        
+        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            if let Ok(parsed) = usize::from_str_radix(self.top_address.display.clone().trim(), 16)
+            {
+                self.top_address.real = parsed;
+                self.memory_viewer_toggle = true;
+            }                                        
+        }
+
+        egui::ComboBox::from_id_salt(format!("{}", stored.address))
+            .selected_text(format!("{:?}", stored.type_of_var))
+            .show_ui(ui, |ui| {
+             ui.selectable_value(&mut stored.type_of_var, Type::Integer, "I32");
+             ui.selectable_value(&mut stored.type_of_var, Type::Float, "F32");                
+            });
+        
+        egui::ScrollArea::vertical().id_salt("Memory_viewer").auto_shrink([false; 2]).show(ui, |ui| {
+            
+        });
+    }
 }
 
-// TODO: Add a memory viewer for addresses, and the ability to change values and types of values within the memoryspace
+// TODO: Add a memory viewer for ses, and the ability to change values and types of values within the memoryspace
 // Basically adding reclass.net
 
 impl eframe::App for MyApp {    
@@ -259,17 +340,22 @@ impl eframe::App for MyApp {
             match self.process.name {
                 Some(ref _name) =>
                 {
-                    let _ = self.build_search_option(ctx, ui);
+                    if self.type_option == SearchOptions::MemoryViewer {
+                        self.memory_viewer(ctx, ui);
+                    }
+                    else {
+                        let _ = self.build_search_option(ctx, ui);
 
-                    egui::Grid::new("Black").show(ui, |ui| {
-                        let mut size = ui.spacing().interact_size;
-                        size.x = 350.0;
-                        size.y = 200.0;
-                        ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Min), |ui| {
-                            let _ = self.show_address_grid(ctx, ui);
-                            let _ = self.show_saved_addresses(ctx, ui);
-                        });                        
-                    });
+                        egui::Grid::new("Black").show(ui, |ui| {
+                            let mut size = ui.spacing().interact_size;
+                            size.x = 350.0;
+                            size.y = 200.0;
+                            ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                                let _ = self.show_address_grid(ctx, ui);
+                                let _ = self.show_saved_addresses(ctx, ui);
+                            });                        
+                        });
+                    }                                                            
                 },
                 None =>
                 {
@@ -279,5 +365,3 @@ impl eframe::App for MyApp {
         });
     }
 }
-
-
