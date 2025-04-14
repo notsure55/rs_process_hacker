@@ -20,10 +20,11 @@ pub enum SearchOptions {
     AddNewAddress,
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Clone)]
 pub enum MemoryOptions {
     #[default]
-    Bytes256,    
+    Bytes256,
+    Bytes1024,
 }
 
 #[derive(Debug)]
@@ -39,6 +40,21 @@ struct StoredValue {
 struct DisplayAddress {
     display: String,
     real: usize,
+}
+
+#[derive(Default, Debug, Clone)]
+struct MemoryValue {
+    type_var: Type,
+    value: String,
+}
+
+#[derive(Default, Debug)]
+struct MemoryViewer {
+    top_address: DisplayAddress,
+    toggle: bool,
+    options: MemoryOptions,
+    values: Vec<MemoryValue>,
+    old_option: MemoryOptions,
 }
 
 #[derive(Default, Debug)]
@@ -61,10 +77,7 @@ pub struct MyApp {
     new_address: String,
 
     // MEMORY VIEWER STUFFS
-    top_address: DisplayAddress,
-    memory_viewer_toggle: bool,
-    memory_options: MemoryOptions,
-    memory_types: Vec<Type>,
+    mem_viewer: MemoryViewer,
 }
 
 impl StoredValue {
@@ -93,7 +106,7 @@ impl MyApp {
                 },
                 Type::Float => {
                     let value: f32 = self.value.trim().parse().expect("Failed to parse value string");
-                    self.process.find_value_repeat(value, &mut self.addresses).expect("Failed to find value");                    
+                    self.process.find_value_repeat(value, &mut self.addresses).expect("Failed to find value"); 
                 },                
             }            
         } else {
@@ -314,77 +327,126 @@ impl MyApp {
         
         Ok(())
     }
-    fn memory_viewer(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui)
-    {
+    fn memory_viewer_display(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui, n: usize) {
+        let mem_struct = &mut self.mem_viewer.values[n];
         
-        let response = ui.text_edit_singleline(&mut self.top_address.display);
+        let address: usize = self.mem_viewer.top_address.real + (n * 4);
+        
+        match &mem_struct.type_var {
+            Type::Integer =>
+            {
+                let (value, bytes) = self.process.read_mem_and_bytes::<i32>(address);
+                let mut s = String::new();
+                for byte in bytes {
+                    write!(&mut s, "0x{:X} ", byte).expect("Unable to write");
+                }
+                ui.label(format!("0x{:X} | {} ", address, s));
+                let response = ui.add(egui::TextEdit::singleline(&mut mem_struct.value)
+                                      .frame(true).desired_width(ui.available_width()));
+                // editing the value                                        
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if let Ok(parsed) = mem_struct.value.trim().parse::<i32>() {
+                        let new_value: i32 = parsed;                                            
+                        self.process.write_mem(address, new_value).expect("failed to write to memory");
+                    }
+                }                                    
+                // when not editing value, constantly read from mem for real time update
+                else if !response.has_focus() {                                        
+                    mem_struct.value = value.to_string();
+                }
+            },
+            Type::Float =>
+            {
+                let (value, bytes) = self.process.read_mem_and_bytes::<f32>(address);
+                let mut s = String::new();
+                for byte in bytes {
+                    write!(&mut s, "0x{:X} ", byte).expect("Unable to write");
+                }
+                ui.label(format!("0x{:X} | {} ", address, s));
+                let response = ui.add(egui::TextEdit::singleline(&mut mem_struct.value)
+                                      .frame(true).desired_width(ui.available_width()));
+                // editing the value                                        
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if let Ok(parsed) = mem_struct.value.trim().parse::<f32>() {
+                        let new_value: f32 = parsed;                                            
+                        self.process.write_mem(address, new_value).expect("failed to write to memory");
+                    }
+                }                                    
+                // when not editing value, constantly read from mem for real time update
+                else if !response.has_focus() {                                        
+                    mem_struct.value = value.to_string();
+                }                                    
+            },
+        }
+
+        egui::ComboBox::from_id_salt(format!("{}", address))
+            .selected_text(format!("{:?}", &mem_struct.type_var))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut mem_struct.type_var, Type::Integer, "I32");
+                ui.selectable_value(&mut mem_struct.type_var, Type::Float, "F32");
+            });
+        // per for loop
+        ui.end_row();                            
+    }                                                    
+    fn memory_viewer(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui)
+    {        
+        let response = ui.text_edit_singleline(&mut self.mem_viewer.top_address.display);
         
         if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            if let Ok(parsed) = usize::from_str_radix(self.top_address.display.clone().trim(), 16)
+            if let Ok(parsed) = usize::from_str_radix(self.mem_viewer.top_address.display.clone().trim(), 16)
             {
-                self.top_address.real = parsed;
-                self.memory_viewer_toggle = true;
-                match &self.memory_options {
+        
+                self.mem_viewer.top_address.real = parsed;
+                self.mem_viewer.toggle = true;
+                match &self.mem_viewer.options
+                {
                     MemoryOptions::Bytes256 =>
-                    {
-                        self.memory_types = vec![Type::Integer; 256 / 4];
+                    {                
+                        self.mem_viewer.values = vec![MemoryValue::default(); 256 / 4];                        
+                    },
+                    MemoryOptions::Bytes1024 =>
+                    {                        
+                        self.mem_viewer.values = vec![MemoryValue::default(); 1024 / 4];                        
                     },
                 }
             }                                        
         }
-
+        
+        if self.mem_viewer.toggle && self.mem_viewer.options != self.mem_viewer.old_option {            
+            self.mem_viewer.values = Vec::new();
+            match &self.mem_viewer.options
+            {
+                MemoryOptions::Bytes256 =>
+                {                
+                    self.mem_viewer.values = vec![MemoryValue::default(); 256 / 4];                        
+                },
+                MemoryOptions::Bytes1024 =>
+                {                        
+                    self.mem_viewer.values = vec![MemoryValue::default(); 1024 / 4];                        
+                },
+            }            
+        }
+        
         if ui.button("Exit").clicked() {
             self.type_option = SearchOptions::Nothing;
         }
+
+        self.mem_viewer.old_option = self.mem_viewer.options.clone();
         
         egui::ComboBox::from_id_salt("Search_options_memory_box")
             .selected_text("Options")
             .show_ui(ui, |ui|{
 
-                ui.selectable_value(&mut self.memory_options, MemoryOptions::Bytes256, "Bytes256");
+                ui.selectable_value(&mut self.mem_viewer.options, MemoryOptions::Bytes256, "Bytes256");
+                ui.selectable_value(&mut self.mem_viewer.options, MemoryOptions::Bytes1024, "Bytes1024");
             });            
         
         egui::ScrollArea::vertical().id_salt("Memory_viewer").auto_shrink([false; 2]).show(ui, |ui| {
-            egui::Grid::new("Memory Viewer").min_col_width(75.0).spacing(egui::vec2(2.0, 2.0)).show(ui, |ui| {
-                match &self.memory_options {
-                    MemoryOptions::Bytes256 =>
-                    {                                        
-                        for (n, mem_type) in self.memory_types.iter_mut().enumerate()
-                        {
-                            let address: usize = self.top_address.real + (n * 4);
-                            
-                            match &mem_type {
-                                Type::Integer =>
-                                {                                    
-                                    let (value, bytes) = self.process.read_mem_and_bytes::<i32>(address);
-                                    let mut s = String::new();
-                                    for byte in bytes {
-                                        write!(&mut s, "0x{:X} ", byte).expect("Unable to write");
-                                    }
-                                    ui.label(format!("0x{:X} | {} | {}", address, s, value));
-                                },
-                                Type::Float =>
-                                {
-                                    let (value, bytes) = self.process.read_mem_and_bytes::<f32>(address);
-                                    let mut s = String::new();
-                                    for byte in bytes {
-                                        write!(&mut s, "0x{:X} ", byte).expect("Unable to write");
-                                    }
-                                    ui.label(format!("0x{:X} | {} | {}", address, s, value));
-                                },
-                            }
-
-                            egui::ComboBox::from_id_salt(format!("{}", address))
-                                .selected_text(format!("{:?}", mem_type))
-                                .show_ui(ui, |ui| {
-                                    ui.selectable_value(mem_type, Type::Integer, "I32");
-                                    ui.selectable_value(mem_type, Type::Float, "F32");
-                                });
-                            // per for loop
-                            ui.end_row();
-                        }                                                
-                    },
-                }
+            egui::Grid::new("Memory Viewer").min_col_width(75.0).spacing(egui::vec2(2.0, 2.0)).show(ui, |ui| {                
+                for n in 0..self.mem_viewer.values.len()
+                {
+                    self.memory_viewer_display(_ctx, ui, n);
+                }                
             });
         });        
     }                                                                 
