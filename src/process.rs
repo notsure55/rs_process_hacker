@@ -126,17 +126,32 @@ impl Process {
         Ok(())
     }
     pub fn read_mem<T: Copy + Pod>(&self, address: usize) -> Result<T, Box<dyn std::error::Error>> {
-        let mut buf = vec![0u8; std::mem::size_of::<T>()];                
+        let mut buf = vec![0u8; std::mem::size_of::<T>()];
+
         self.handle.as_ref()
             .unwrap()
             .read_exact_at(&mut buf, address as u64)?;
 
         let read_value: T = * bytemuck::try_from_bytes(&buf[0..std::mem::size_of::<T>()])
             .map_err(|err| eprintln!("Failed to read value from address: 0x{:x} ERROR: {}", address, err))
-            .unwrap();
+            .unwrap();                
         
         Ok(read_value)
-    }    
+    }
+    pub fn read_mem_and_bytes<T: Copy + Pod>(&self, address: usize) -> (T, Vec<u8>){
+        let mut buf = vec![0u8; std::mem::size_of::<T>()];
+                
+        self.handle.as_ref()
+            .unwrap()
+            .read_exact_at(&mut buf, address as u64)
+            .expect("Failed to read bytes");
+
+        let read_value: T = * bytemuck::try_from_bytes(&buf[0..std::mem::size_of::<T>()])
+            .map_err(|err| eprintln!("Failed to read value from address: 0x{:x} ERROR: {}", address, err))
+            .unwrap();
+
+        return (read_value, buf)        
+    }
     pub fn write_mem<T: Copy + Pod >(&self, address: usize, value: T) -> Result<(), io::Error> {        
         let buf = bytemuck::bytes_of(&value);        
         let _ = self.handle.as_ref().unwrap().write_at(&buf, address as u64);

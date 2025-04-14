@@ -1,5 +1,6 @@
 use crate::process;
 use std::collections::BTreeMap;
+use std::fmt::Write;
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub enum Type {
@@ -331,6 +332,10 @@ impl MyApp {
                 }
             }                                        
         }
+
+        if ui.button("Exit").clicked() {
+            self.type_option = SearchOptions::Nothing;
+        }
         
         egui::ComboBox::from_id_salt("Search_options_memory_box")
             .selected_text("Options")
@@ -350,15 +355,22 @@ impl MyApp {
                             
                             match &mem_type {
                                 Type::Integer =>
-                                {
-                                    
-                                    let value: i32 = self.process.read_mem(address)
-                                        .expect(&format!("Failed to read addresss: {:x}", address));
-                                    ui.label(format!("{:x} | {}", address, value));
+                                {                                    
+                                    let (value, bytes) = self.process.read_mem_and_bytes::<i32>(address);
+                                    let mut s = String::new();
+                                    for byte in bytes {
+                                        write!(&mut s, "0x{:X} ", byte).expect("Unable to write");
+                                    }
+                                    ui.label(format!("0x{:X} | {} | {}", address, s, value));
                                 },
                                 Type::Float =>
                                 {
-                                    //
+                                    let (value, bytes) = self.process.read_mem_and_bytes::<f32>(address);
+                                    let mut s = String::new();
+                                    for byte in bytes {
+                                        write!(&mut s, "0x{:X} ", byte).expect("Unable to write");
+                                    }
+                                    ui.label(format!("0x{:X} | {} | {}", address, s, value));
                                 },
                             }
 
