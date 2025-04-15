@@ -47,6 +47,33 @@ impl Process {
         }        
         Err(io::Error::new(io::ErrorKind::NotFound, "Process not found"))
     }
+    fn parse_pattern_string(s: &str) -> Vec<u8> {
+        s.split_whitespace()
+            .map(|byte_str| u8::from_str_radix(byte_str, 16).expect("Invalid hex byte"))
+            .collect()
+    }    
+    // pattern scanning also know as sig scanning
+    pub fn find_pattern(&self, pattern: &str) -> Result<usize, io::Error> {
+        let pattern = Self::parse_pattern_string(pattern);
+        let signature = &pattern[..];
+        for (start_address, end_address) in self.maps.clone() {            
+            // we get size of the address space that we want to read from per /proc/pid/maps
+            let size: usize = end_address - start_address;
+            let mut buf = vec![0u8; size];            
+            self.handle.as_ref()
+                .unwrap()
+                .read_exact_at(&mut buf, start_address as u64)
+                .expect(&format!("Failed to read from 0x{start_address:x}-0x{end_address:x}"));
+            
+            for i in 0..=(size - signature.len()) {                                                
+                if signature.as_ref().mem_eq(&buf[i..(i + signature.len())]) {
+                    return Ok(i + start_address)
+                }                                
+            }            
+        }
+        
+        Err(io::Error::new(io::ErrorKind::NotFound, "Sig not found"))
+    }
     fn find_maps(pid: u32) -> Result<BTreeMap<usize, usize>, io::Error> {
         let content = match fs::read_to_string(format!("/proc/{}/maps", pid)) {
             Ok(content) => content,

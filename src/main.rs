@@ -15,6 +15,6 @@ fn main() -> Result<()> {
         "Rem Engine",
         options,
         Box::new(|_cc| Ok(Box::<window::MyApp>::default())),
-    );    
+    );        
     Ok(())
 }
