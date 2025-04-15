@@ -1,5 +1,4 @@
 use crate::process;
-use std::collections::BTreeMap;
 use std::fmt::Write;
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -7,6 +6,7 @@ pub enum Type {
     #[default]
     Integer,
     Float,
+    Pointer,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -60,7 +60,7 @@ struct MemoryViewer {
 #[derive(Default, Debug)]
 pub struct MyApp {
     // WHERE ADDRESSES ARE STROED
-    addresses: BTreeMap<usize, Type>,
+    addresses: Vec<usize>,
     saved_addresses: Vec<StoredValue>,
     
     // PROCESS INPUT AND STUFFS
@@ -73,7 +73,7 @@ pub struct MyApp {
     type_option: SearchOptions,
 
     // ADDING NEW ADDRESS    
-    add_new_address: bool,
+    //add_new_address: bool,
     new_address: String,
 
     // MEMORY VIEWER STUFFS
@@ -82,9 +82,9 @@ pub struct MyApp {
 
 impl StoredValue {
     pub fn new(address: String) -> Self {
-        let address_usize: usize = usize::from_str_radix(address.clone()
+        let address_usize: usize = usize::from_str_radix(&address
             .trim(), 16)
-            .expect(&format!("Failed to parse address: {}", address.clone()));
+            .expect(&format!("Failed to parse address: {}", &address));
         
         Self {
             name: String::new(),
@@ -100,24 +100,42 @@ impl MyApp {
     fn scan_value(&mut self) {
         if !self.addresses.is_empty() {
             match &self.type_of_var {
-                Type::Integer => {                                
+                Type::Integer =>
+                {                                
                     let value: i32 = self.value.trim().parse().expect("Failed to parse value string");
-                    self.process.find_value_repeat(value, &mut self.addresses).expect("Failed to find value");
+                    self.process.find_value_repeat(value, &mut self.addresses);
                 },
-                Type::Float => {
+                Type::Float =>
+                {
                     let value: f32 = self.value.trim().parse().expect("Failed to parse value string");
-                    self.process.find_value_repeat(value, &mut self.addresses).expect("Failed to find value"); 
-                },                
+                    self.process.find_value_repeat(value, &mut self.addresses);
+                },
+                Type::Pointer =>
+                {
+                    if let Ok(addr) = usize::from_str_radix(&self.value.trim(), 16) {
+                        let value = addr;
+                        self.process.find_value_repeat(value, &mut self.addresses);
+                    }                                        
+                },
             }            
         } else {
             match &self.type_of_var {
-                Type::Integer => {                                
+                Type::Integer =>
+                {                                
                     let value: i32 = self.value.trim().parse().expect("Failed to parse value string");
-                    self.addresses = self.process.find_value(value).expect("Failed to find value");
+                    self.addresses = self.process.find_value(value);
                 },
-                Type::Float => {
+                Type::Float =>
+                {
                     let value: f32 = self.value.trim().parse().expect("Failed to parse value string");
-                    self.addresses = self.process.find_value(value).expect("Failed to find value");
+                    self.addresses = self.process.find_value(value);
+                },
+                Type::Pointer =>
+                {
+                    if let Ok(addr) = usize::from_str_radix(&self.value.trim(), 16) {
+                        let value = addr;
+                        self.addresses = self.process.find_value(value);
+                    }
                 },                
             }
         }
@@ -137,7 +155,8 @@ impl MyApp {
                 .show_ui(ui, |ui|{
                     
                     ui.selectable_value(&mut self.type_of_var, Type::Integer, "I32");
-                    ui.selectable_value(&mut self.type_of_var, Type::Float, "F32");                
+                    ui.selectable_value(&mut self.type_of_var, Type::Float, "F32");
+                    ui.selectable_value(&mut self.type_of_var, Type::Pointer, "USIZE");                
                 });
 
             egui::ComboBox::from_id_salt("Search_options_combo_box")
@@ -166,7 +185,7 @@ impl MyApp {
                 }, 
                 SearchOptions::NewScan =>
                 {
-                    self.addresses = BTreeMap::new();
+                    self.addresses = Vec::new();
                     self.type_option = SearchOptions::Nothing;
                 },
                 SearchOptions::Restart =>
@@ -195,34 +214,49 @@ impl MyApp {
     }
     fn show_address_grid(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) -> Result<(), Box<dyn std::error::Error>> {
         egui::ScrollArea::vertical().id_salt("scroll_area_2").auto_shrink([false; 2]).show(ui, |ui| {
-            egui::Grid::new("New Addresses").spacing(egui::vec2(5.0, 6.0)).show(ui, |ui| {                        
+            egui::Grid::new("New Addresses").spacing(egui::vec2(5.0, 6.0)).show(ui, |ui| {
+                let mut saved = Vec::new();
                 let mut count = 0;
-                for (address, value_type) in self.addresses.clone().iter() {                    
-                    match value_type {
+                for (i, address) in self.addresses.iter().enumerate() {                    
+                    match self.type_of_var {
                         Type::Integer => {
-                            let value: i32 = self.process.read_mem(*address).unwrap();
-                            ui.label(format!("Address: 0x{:x} | {:?}:Value:{}", address, value_type, value));
+                            let value: i32 = self.process.read_mem(address).unwrap();
+                            ui.label(format!("Address: 0x{:x} | Value:{}", address, value));
                             
                             if ui.button("Save").clicked() {                                 
                                 // store addresses, and remove from stack
-                                self.saved_addresses.push(StoredValue::new(format!("{:x}", address.clone())));
-                                self.addresses.remove(&address);
+                                self.saved_addresses.push(StoredValue::new(format!("{:x}", address)));
+                                saved.push(i);
                             }
                         },
                         Type::Float => {
-                            let value: f32 = self.process.read_mem(*address).unwrap();
-                            ui.label(format!("Address: 0x{:x} | {:?}:Value:{}", address, value_type, value));
+                            let value: f32 = self.process.read_mem(address).unwrap();
+                            ui.label(format!("Address: 0x{:x} | Value:{}", address, value));
                             
                             if ui.button("Save").clicked() {
                                 // store addresses, and remove from stack
-                                self.saved_addresses.push(StoredValue::new(format!("{:x}", address.clone())));
-                                self.addresses.remove(&address);                                
+                                self.saved_addresses.push(StoredValue::new(format!("{:x}", address)));
+                                saved.push(i);                                
                             }
-                        },                        
+                        },
+                        _ =>
+                        {
+                            let value: usize = self.process.read_mem(address).unwrap();
+                            ui.label(format!("Address: 0x{:x} | Value:{:x}", address, value));
+                            
+                            if ui.button("Save").clicked() {
+                                // store addresses, and remove from stack
+                                self.saved_addresses.push(StoredValue::new(format!("{:x}", address)));
+                                saved.push(i);                                                                
+                            }
+                        },
                     }                    
                     ui.end_row();                                            
                     if count > 100 { break; }
                     count += 1;                
+                }
+                for i in saved {
+                    self.addresses.remove(i);
                 }
             });                            
         });        
@@ -255,7 +289,7 @@ impl MyApp {
                               .frame(true).desired_width(ui.available_width()));
         // if let statements go hard
         if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            if let Ok(addr) = usize::from_str_radix(&stored.address.clone().trim(), 16) {
+            if let Ok(addr) = usize::from_str_radix(&stored.address.trim(), 16) {
                 stored.address_usize = addr;                                                                     
             }                        
         }
@@ -277,7 +311,7 @@ impl MyApp {
                 }
                 // when not editing value, constantly read from mem for real time update
                 else if !response.has_focus() {                    
-                    let value: i32 = process.read_mem(stored.address_usize)
+                    let value: i32 = process.read_mem(&stored.address_usize)
                         .expect("Failed to unwrap read_mem");
                     stored.value = value.to_string();
                 }                                                
@@ -295,17 +329,36 @@ impl MyApp {
                 }
                 // when not editing value, constantly read from mem for real time update
                 else if !response.has_focus() {                    
-                    let value: f32 = process.read_mem(stored.address_usize)
+                    let value: f32 = process.read_mem(&stored.address_usize)
                         .expect("Failed to unwrap read_mem");
                     stored.value = value.to_string();
                 }
-            },            
-        }                                
+            },
+            Type::Pointer =>
+            {
+                // editing the value                                        
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if let Ok(parsed) = stored.value.trim().parse::<usize>() {
+                        let value: usize = parsed;
+                        println!("0x{:x}", stored.address_usize);
+                        process.write_mem(stored.address_usize, value)
+                            .expect("failed to write to memory");
+                    }
+                }
+                // when not editing value, constantly read from mem for real time update
+                else if !response.has_focus() {                    
+                    let value: usize = process.read_mem(&stored.address_usize)
+                        .expect("Failed to unwrap read_mem");
+                    stored.value = format!("{:x}", value);
+                }
+            },
+        }     
         egui::ComboBox::from_id_salt(format!("{}", stored.address))
             .selected_text(format!("{:?}", stored.type_of_var))
             .show_ui(ui, |ui| {
              ui.selectable_value(&mut stored.type_of_var, Type::Integer, "I32");
-             ui.selectable_value(&mut stored.type_of_var, Type::Float, "F32");                
+             ui.selectable_value(&mut stored.type_of_var, Type::Float, "F32");
+             ui.selectable_value(&mut stored.type_of_var, Type::Pointer, "USIZE");                   
         });                
     }
     fn show_saved_addresses(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) -> Result<(), Box<dyn std::error::Error>> {
@@ -340,7 +393,7 @@ impl MyApp {
                 for byte in bytes {
                     write!(&mut s, "0x{:X} ", byte).expect("Unable to write");
                 }
-                ui.label(format!("0x{:X} | {} ", address, s));
+                ui.label(format!("{:X} | 0x{:X} | {} ", n * 4, address, s));                
                 let response = ui.add(egui::TextEdit::singleline(&mut mem_struct.value)
                                       .frame(true).desired_width(ui.available_width()));
                 // editing the value                                        
@@ -362,7 +415,7 @@ impl MyApp {
                 for byte in bytes {
                     write!(&mut s, "0x{:X} ", byte).expect("Unable to write");
                 }
-                ui.label(format!("0x{:X} | {} ", address, s));
+                ui.label(format!("{:X} | 0x{:X} | {} ", n * 4, address, s));
                 let response = ui.add(egui::TextEdit::singleline(&mut mem_struct.value)
                                       .frame(true).desired_width(ui.available_width()));
                 // editing the value                                        
@@ -377,6 +430,28 @@ impl MyApp {
                     mem_struct.value = value.to_string();
                 }                                    
             },
+            Type::Pointer =>
+            {
+                let (value, bytes) = self.process.read_mem_and_bytes::<usize>(address);
+                let mut s = String::new();
+                for byte in bytes {
+                    write!(&mut s, "0x{:X} ", byte).expect("Unable to write");
+                }
+                ui.label(format!("{:X} | 0x{:X} | {} ", n * 4, address, s));                
+                let response = ui.add(egui::TextEdit::singleline(&mut mem_struct.value)
+                                      .frame(true).desired_width(ui.available_width()));
+                // editing the value                                        
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if let Ok(parsed) = mem_struct.value.trim().parse::<usize>() {
+                        let new_value: usize = parsed;
+                        self.process.write_mem(address, new_value).expect("failed to write to memory");
+                    }
+                }                                    
+                // when not editing value, constantly read from mem for real time update
+                else if !response.has_focus() {                                        
+                    mem_struct.value = format!("{:X}", value);
+                }                        
+            },
         }
 
         egui::ComboBox::from_id_salt(format!("{}", address))
@@ -384,16 +459,17 @@ impl MyApp {
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut mem_struct.type_var, Type::Integer, "I32");
                 ui.selectable_value(&mut mem_struct.type_var, Type::Float, "F32");
+                ui.selectable_value(&mut mem_struct.type_var, Type::Pointer, "USIZE");
             });
         // per for loop
-        ui.end_row();                            
+        ui.end_row();    
     }                                                    
     fn memory_viewer(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui)
     {        
         let response = ui.text_edit_singleline(&mut self.mem_viewer.top_address.display);
         
         if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            if let Ok(parsed) = usize::from_str_radix(self.mem_viewer.top_address.display.clone().trim(), 16)
+            if let Ok(parsed) = usize::from_str_radix(&self.mem_viewer.top_address.display.trim(), 16)
             {
         
                 self.mem_viewer.top_address.real = parsed;
@@ -446,7 +522,7 @@ impl MyApp {
                 for n in 0..self.mem_viewer.values.len()
                 {
                     self.memory_viewer_display(_ctx, ui, n);
-                }                
+                }
             });
         });        
     }                                                                 

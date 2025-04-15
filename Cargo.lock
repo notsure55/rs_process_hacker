@@ -1653,6 +1653,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mem_cmp"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf29e432e02999285b35a0dca13624beb953d31f0c2d1a3cd5d36743f2f70d67"
+
+[[package]]
 name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1683,6 +1689,7 @@ dependencies = [
  "bytemuck",
  "eframe",
  "egui",
+ "mem_cmp",
  "num-traits",
 ]
 

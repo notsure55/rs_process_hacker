@@ -3,8 +3,8 @@ use std::os::unix::prelude::FileExt;
 use std::io;
 use std::fs;
 use bytemuck::Pod;
-use crate::window::Type;
 use std::fs::OpenOptions;
+use mem_cmp::MemEq;
 
 #[derive(Debug, Default)]
 pub struct Process {
@@ -86,14 +86,13 @@ impl Process {
         
         Ok(file)        
     }
-    // we add pod to traits or else we cant use try_from_bytes
-    pub fn find_value<T: Copy + PartialEq + Pod>(&self, value: T) -> Result<BTreeMap<usize, Type>, io::Error> {        
-        let value_type = match std::any::type_name::<T>() {
-            "i32" => Type::Integer,
-            "f32" => Type::Float,
-            _ => Type::default(),            
-        };
-        let mut address_map: BTreeMap<usize, Type> = BTreeMap::new();
+    
+    pub fn find_value<T: Copy + PartialEq + Pod + MemEq + num_traits::ops::bytes::ToBytes>(&self, value: T) -> Vec<usize> {
+        // getting value bytes and size
+        let value_size = std::mem::size_of::<T>();
+        let value = value.to_ne_bytes();
+        
+        let mut addresses = vec![];
         for (start_address, end_address) in self.maps.clone() {            
             // we get size of the address space that we want to read from per /proc/pid/maps
             let size: usize = end_address - start_address;
@@ -101,36 +100,30 @@ impl Process {
             self.handle.as_ref()
                 .unwrap()
                 .read_exact_at(&mut buf, start_address as u64)
-                .expect(&format!("Failed to read from 0x{start_address:x}-0x{end_address:x}"));            
-            for i in 0..=(size - std::mem::size_of::<T>()) {
-                // if the value aligns to our type we derefrence it and store in read_value then compare to input value
-                let read_value: T = match bytemuck::try_from_bytes(&buf[i..(std::mem::size_of::<T>() + i)]) {
-                    Ok(value) => *value,
-                    Err(_) => continue,
-                };
-                
-                if read_value == value {                    
-                    address_map.insert(i + start_address, value_type.clone());
-                }                
+                .expect(&format!("Failed to read from 0x{start_address:x}-0x{end_address:x}"));
+            
+            for i in 0..=(size - std::mem::size_of::<T>()) {                                                
+                if value.as_ref().mem_eq(&buf[i..(i + value_size)]) {
+                    addresses.push(i + start_address);
+                }                                
             }            
         }                        
-        return Ok(address_map)            
+        addresses           
     }
-    pub fn find_value_repeat<T: Pod + PartialEq + std::fmt::Display>(&self, new_value: T, addresses: &mut BTreeMap<usize, Type>) -> Result<(), io::Error> {        
-        for (address, _) in addresses.clone() {
-            let value: T = self.read_mem(address).expect("Failed to read_address");            
-            if new_value != value {                
-                addresses.remove(&address);
-            }
-        }
+    pub fn find_value_repeat<T: Pod + PartialEq + std::fmt::Display>(&self, new_value: T, addresses: &mut Vec<usize>) -> Result<(), io::Error> {
+        // returns only addresses where it equals new value
+        addresses.retain(|&address| {
+            let value: T = self.read_mem(&address).expect("Failed to read_address");
+            new_value == value            
+        });        
         Ok(())
     }
-    pub fn read_mem<T: Copy + Pod>(&self, address: usize) -> Result<T, Box<dyn std::error::Error>> {
+    pub fn read_mem<T: Copy + Pod>(&self, address: &usize) -> Result<T, Box<dyn std::error::Error>> {
         let mut buf = vec![0u8; std::mem::size_of::<T>()];
 
         self.handle.as_ref()
             .unwrap()
-            .read_exact_at(&mut buf, address as u64)?;
+            .read_exact_at(&mut buf, *address as u64)?;
 
         let read_value: T = * bytemuck::try_from_bytes(&buf[0..std::mem::size_of::<T>()])
             .map_err(|err| eprintln!("Failed to read value from address: 0x{:x} ERROR: {}", address, err))
